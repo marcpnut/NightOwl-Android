@@ -79,6 +79,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -1127,6 +1128,7 @@ private fun PlayerScreen(
     var advanced by remember(request.url) { mutableStateOf(false) }
     var showControls by remember(request.url) { mutableStateOf(true) }
     var remuxAttempted by remember(request.url) { mutableStateOf(false) }
+    val isRemuxPlayback by rememberUpdatedState(remuxAttempted)
     var playbackError by remember(request.url) { mutableStateOf("") }
     var isPlaying by remember(request.url) { mutableStateOf(true) }
     var lastInteraction by remember(request.url) { mutableStateOf(System.currentTimeMillis()) }
@@ -1204,6 +1206,7 @@ private fun PlayerScreen(
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED && !advanced) {
+                    if (isRemuxPlayback) return
                     advanced = true
                     val next = if (!dismissedNext) request.nextEpisode else null
                     if (next != null) onAdvance(request.item, next, player.currentPosition.coerceAtLeast(0) / 1000, player.duration.takeIf { it > 0 }?.div(1000))
@@ -1214,7 +1217,7 @@ private fun PlayerScreen(
     }
 
     val remainingMs = (durationMs - positionMs).coerceAtLeast(0)
-    val showNext = request.item.kind == "episode" && request.nextEpisode != null && !dismissedNext && !advanced && durationMs > 0 && remainingMs <= 10_000 && remainingMs > 0
+    val showNext = !remuxAttempted && request.item.kind == "episode" && request.nextEpisode != null && !dismissedNext && !advanced && durationMs > 0 && remainingMs <= 10_000 && remainingMs > 0
     val nextProgress = ((10_000 - remainingMs).coerceIn(0, 10_000).toFloat() / 10_000f)
     val activeAudio = trackChoices.firstOrNull { it.trackType == C.TRACK_TYPE_AUDIO && it.selected }
     val activeSubtitle = trackChoices.firstOrNull { it.trackType == C.TRACK_TYPE_TEXT && it.selected }
