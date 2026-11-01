@@ -21,7 +21,7 @@ jobs:
       - name: Install Android SDK packages
         run: |
           set +e
-          sdkmanager --channel=3 "platforms;android-37" "build-tools;36.0.0" > sdk-install.log 2>&1
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0" > sdk-install.log 2>&1
           result=$?
           cat sdk-install.log
           exit $result

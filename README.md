@@ -12,7 +12,7 @@ A native Android phone client for the existing NightOwl server. This is a separa
 ## Requirements
 
 - JDK 17
-- Android SDK Platform 37 and Build Tools 37.0.0
+- Android SDK Platform 37.0 and Build Tools 37.0.0
 - Gradle 9.6 (the Gradle wrapper is included)
 
 Build a debug APK with:
