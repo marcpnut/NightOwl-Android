@@ -16,9 +16,22 @@ class NightOwlApi(private val session: NightOwlSession) {
 
     suspend fun requestLogout() { request("POST", "/auth/logout", JSONObject()) }
 
-    suspend fun profiles(): List<ProfileInfo> {
-        val items = request("GET", "/profiles").optJSONArray("items") ?: return emptyList()
-        return (0 until items.length()).mapNotNull { i -> items.optJSONObject(i)?.toProfileInfo() }
+    suspend fun profiles(): ProfilesData {
+        val data = request("GET", "/profiles")
+        val items = data.optJSONArray("items") ?: org.json.JSONArray()
+        return ProfilesData(
+            items = (0 until items.length()).mapNotNull { i -> items.optJSONObject(i)?.toProfileInfo() },
+            selectedProfileId = data.optString("selectedProfileId").takeUnless { it.isBlank() || it == "null" },
+            mainProfileId = data.optString("mainProfileId").takeUnless { it.isBlank() || it == "null" }
+        )
+    }
+
+    suspend fun selectProfile(profileId: String) {
+        request("PUT", "/profiles/selection", JSONObject().put("profileId", profileId))
+    }
+
+    suspend fun setMainProfile(profileId: String) {
+        request("PUT", "/profiles/${encode(profileId)}/main", JSONObject())
     }
 
     suspend fun createProfile(name: String): ProfileInfo {

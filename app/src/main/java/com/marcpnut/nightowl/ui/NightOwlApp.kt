@@ -178,9 +178,14 @@ fun NightOwlApp(sessionStore: SessionStore) {
         loading = true
         try {
             api.health()
-            val availableProfiles = api.profiles()
-            val chosen = availableProfiles.firstOrNull() ?: api.createProfile("Default")
+            val profileData = api.profiles()
+            val availableProfiles = profileData.items
+            val chosen = availableProfiles.firstOrNull { it.id == profileData.selectedProfileId }
+                ?: availableProfiles.firstOrNull { it.id == profileData.mainProfileId }
+                ?: availableProfiles.firstOrNull()
+                ?: api.createProfile("Default")
             profiles = if (availableProfiles.isEmpty()) listOf(chosen) else availableProfiles
+            if (profileData.selectedProfileId != chosen.id) api.selectProfile(chosen.id)
             profile = chosen
             profileSettings = chosen.settings
             favoriteKeys = api.myList(chosen.id).map { favoriteKey(it) }.toSet()
@@ -400,14 +405,27 @@ fun NightOwlApp(sessionStore: SessionStore) {
 
     fun selectProfile(next: ProfileInfo) {
         if (profile?.id == next.id) return
-        profile = next
-        profileSettings = next.settings
-        selectedItem = null
-        categoryId = ""
         val currentApi = api ?: return
         scope.launch {
-            try { favoriteKeys = currentApi.myList(next.id).map { favoriteKey(it) }.toSet() }
+            try {
+                currentApi.selectProfile(next.id)
+                profile = next
+                profileSettings = next.settings
+                selectedItem = null
+                categoryId = ""
+                favoriteKeys = currentApi.myList(next.id).map { favoriteKey(it) }.toSet()
+            }
             catch (error: Exception) { screenError = error.message ?: "Could not load this profile." }
+        }
+    }
+
+    fun setMainProfile(next: ProfileInfo) {
+        val currentApi = api ?: return
+        scope.launch {
+            try {
+                currentApi.setMainProfile(next.id)
+                profiles = profiles.map { it.copy(isMain = it.id == next.id) }
+            } catch (error: Exception) { screenError = error.message ?: "Could not set the main profile." }
         }
     }
 
@@ -521,7 +539,7 @@ fun NightOwlApp(sessionStore: SessionStore) {
             } else if (activeTab == AppTab.SETTINGS) {
                 SettingsScreen(serverUrl = session?.serverUrl.orEmpty(), settings = profileSettings, categories = settingsCategories,
                     profiles = profiles, selectedProfileId = profile?.id.orEmpty(), onSelectProfile = ::selectProfile, onAddProfile = ::addProfile,
-                    onSettings = ::updateProfileSettings, onSignOut = ::signOut)
+                    onSetMainProfile = ::setMainProfile, onSettings = ::updateProfileSettings, onSignOut = ::signOut)
             } else when (activeTab) {
                 AppTab.HOME -> HomeScreen(
                     home = home,
@@ -896,6 +914,7 @@ private fun SettingsScreen(
     selectedProfileId: String,
     onSelectProfile: (ProfileInfo) -> Unit,
     onAddProfile: (String) -> Unit,
+    onSetMainProfile: (ProfileInfo) -> Unit,
     onSettings: (ProfileSettings) -> Unit,
     onSignOut: () -> Unit
 ) {
@@ -925,8 +944,12 @@ private fun SettingsScreen(
         item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
                 items(profiles, key = { "profile-${it.id}" }) { userProfile ->
-                    FilterChip(selected = userProfile.id == selectedProfileId, onClick = { onSelectProfile(userProfile) },
-                        label = { Text(userProfile.name, maxLines = 1) })
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        FilterChip(selected = userProfile.id == selectedProfileId, onClick = { onSelectProfile(userProfile) },
+                            label = { Text(if (userProfile.isMain) "${userProfile.name} · Main" else userProfile.name, maxLines = 1) })
+                        if (userProfile.isMain) Text("Main profile", color = Color(0xFF9AA4B3), fontSize = 11.sp)
+                        else TextButton(onClick = { onSetMainProfile(userProfile) }) { Text("Set as main", color = NightCyan, fontSize = 11.sp) }
+                    }
                 }
             }
         }

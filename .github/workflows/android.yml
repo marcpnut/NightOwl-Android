@@ -29,13 +29,13 @@ jobs:
       - name: Assemble debug APK
         run: set -o pipefail; ./gradlew assembleDebug --stacktrace --console=plain 2>&1 | tee android-build.log
       - name: Give APK its release filename
-        run: cp app/build/outputs/apk/debug/app-debug.apk NightOwl-Android-0.2.2.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk NightOwl-Android-0.2.3.apk
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: NightOwl-Android-0.2.2
+          name: NightOwl-Android-0.2.3
           path: |
-            NightOwl-Android-0.2.2.apk
+            NightOwl-Android-0.2.3.apk
             android-build.log
             sdk-install.log
           if-no-files-found: warn
@@ -43,4 +43,4 @@ jobs:
         if: success() && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create v0.2.2 NightOwl-Android-0.2.2.apk --title "NightOwl Android 0.2.2" --generate-notes
+        run: gh release create v0.2.3 NightOwl-Android-0.2.3.apk --title "NightOwl Android 0.2.3" --generate-notes

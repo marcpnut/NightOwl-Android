@@ -28,7 +28,8 @@ data class MediaItem(
 
 data class Shelf(val id: String, val title: String, val items: List<MediaItem>)
 data class HomeData(val featured: MediaItem?, val rows: List<Shelf>)
-data class ProfileInfo(val id: String, val name: String, val settings: ProfileSettings = ProfileSettings())
+data class ProfileInfo(val id: String, val name: String, val settings: ProfileSettings = ProfileSettings(), val isMain: Boolean = false)
+data class ProfilesData(val items: List<ProfileInfo>, val selectedProfileId: String?, val mainProfileId: String?)
 data class ProfileSettings(
     val subtitleSearchLanguages: List<String> = listOf("en", "nl", "pl"),
     val preferHearingImpairedSubtitles: Boolean = false,
@@ -75,7 +76,7 @@ internal fun JSONObject.toProfileInfo(): ProfileInfo {
         hiddenLiveCategories = strings(hidden?.optJSONArray("live")),
         hiddenMovieCategories = strings(hidden?.optJSONArray("movies")),
         hiddenSeriesCategories = strings(hidden?.optJSONArray("series"))
-    ))
+    ), optBoolean("isMain"))
 }
 
 internal fun JSONObject.toShelf(): Shelf = Shelf(
