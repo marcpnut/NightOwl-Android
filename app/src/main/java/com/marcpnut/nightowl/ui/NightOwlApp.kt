@@ -884,7 +884,7 @@ private fun PlayerScreen(
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
             factory = { viewContext -> PlayerView(viewContext).apply {
-                player = playbackPlayer
+                setPlayer(playbackPlayer)
                 useController = true
                 controllerShowTimeoutMs = 4_000
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
@@ -892,7 +892,7 @@ private fun PlayerScreen(
                 setOnClickListener { showControls = !showControls }
             } },
             modifier = Modifier.fillMaxSize(),
-            update = { it.player = playbackPlayer }
+            update = { it.setPlayer(playbackPlayer) }
         )
         if (showControls) {
             Surface(
