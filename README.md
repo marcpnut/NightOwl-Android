@@ -29,3 +29,8 @@ Enter your own NightOwl server address on the sign-in screen. Use HTTPS for acco
 
 The app connects to the existing NightOwl API. It does not store Xtream credentials, modify the server database, or create user accounts.
 
+
+## Downloads
+
+Download the current Android phone test APK from the [0.1.0 prerelease](https://github.com/marcpnut/NightOwl-Android/releases/tag/v0.1.0). It is a debug-signed build for sideloading.
+
