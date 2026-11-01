@@ -19,7 +19,12 @@ jobs:
           java-version: '17'
       - uses: android-actions/setup-android@v4.0.4
       - name: Install Android SDK packages
-        run: sdkmanager --channel=3 "platforms;android-37" "build-tools;37.0.0"
+        run: |
+          set +e
+          sdkmanager --channel=3 "platforms;android-37" "build-tools;36.0.0" > sdk-install.log 2>&1
+          result=$?
+          cat sdk-install.log
+          exit $result
       - uses: gradle/actions/setup-gradle@v4
       - name: Assemble debug APK
         run: set -o pipefail; ./gradlew assembleDebug --stacktrace --console=plain 2>&1 | tee android-build.log
@@ -30,4 +35,5 @@ jobs:
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             android-build.log
+            sdk-install.log
           if-no-files-found: warn
