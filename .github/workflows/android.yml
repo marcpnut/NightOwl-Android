@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   assemble:
@@ -37,3 +37,8 @@ jobs:
             android-build.log
             sdk-install.log
           if-no-files-found: warn
+      - name: Publish downloadable APK release
+        if: success() && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create v0.2.0 app/build/outputs/apk/debug/app-debug.apk --title "NightOwl Android 0.2.0" --generate-notes

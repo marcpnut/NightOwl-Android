@@ -4,10 +4,12 @@ A native Android phone client for the existing NightOwl server. This is a separa
 
 ## Phone layout
 
-- Home and What's New use vertically scrollable shelves, with horizontally swipeable cards sized for touch.
+- Home and What's New use vertically scrollable shelves, with horizontally swipeable cards sized for touch. Continue Watching is deduplicated by the server and its progress is shared across signed-in devices.
 - Shows, movies, live TV, and search use two-column poster grids and paged results. Cards and buttons keep comfortable tap targets and readable labels.
 - The bottom navigation stays at five primary destinations. Search, My List, and Settings are in the compact top bar; the logo and actions reduce slightly on narrow phones.
-- Series details show season selectors and episode rows. Playback uses Android Media3 and supports the server's resolved provider streams, watch progress, and the next-episode prompt.
+- Series details show season selectors and episode rows. Playback uses Android Media3, tries the provider stream before falling back to a server remux, syncs progress, and offers the next episode near the end.
+- Player controls are arranged for a phone: play/pause, 10-second skip controls, and the seek bar share one bottom row. Audio/subtitle selection and adding the playing show or movie to My List are available in the player. The app runs immersive with Android system bars hidden.
+- Subtitle preferences and hidden Live TV/movie/show categories are stored with the server profile and sync across devices.
 
 ## Requirements
 
@@ -32,5 +34,5 @@ The app connects to the existing NightOwl API. It does not store Xtream credenti
 
 ## Downloads
 
-Download the current Android phone test APK from the [0.1.0 prerelease](https://github.com/marcpnut/NightOwl-Android/releases/tag/v0.1.0). It is a debug-signed build for sideloading.
+Download the current Android phone test APK [directly](https://github.com/marcpnut/NightOwl-Android/releases/download/v0.2.0/app-debug.apk) or view the [0.2.0 release notes](https://github.com/marcpnut/NightOwl-Android/releases/tag/v0.2.0). It is a debug-signed build for sideloading.
 

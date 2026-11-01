@@ -37,16 +37,25 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -57,6 +66,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -91,6 +101,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.C
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -103,6 +116,7 @@ import com.marcpnut.nightowl.data.NightOwlApi
 import com.marcpnut.nightowl.data.NightOwlApiException
 import com.marcpnut.nightowl.data.NightOwlSession
 import com.marcpnut.nightowl.data.ProfileInfo
+import com.marcpnut.nightowl.data.ProfileSettings
 import com.marcpnut.nightowl.data.SeasonInfo
 import com.marcpnut.nightowl.data.SessionStore
 import kotlinx.coroutines.Dispatchers
@@ -124,6 +138,8 @@ private enum class AppTab(val label: String) {
 }
 
 private data class PlayerRequest(val item: MediaItem, val url: String, val nextEpisode: MediaItem?)
+private data class TrackChoice(val group: Tracks.Group, val trackIndex: Int, val trackType: Int, val label: String, val language: String, val selected: Boolean)
+private enum class TrackPicker { AUDIO, SUBTITLES }
 
 @Composable
 fun NightOwlApp(sessionStore: SessionStore) {
@@ -147,6 +163,8 @@ fun NightOwlApp(sessionStore: SessionStore) {
     var selectedSeason by remember { mutableStateOf<Int?>(null) }
     var episodes by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var favoriteKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var profileSettings by remember { mutableStateOf(ProfileSettings()) }
+    var settingsCategories by remember { mutableStateOf<Map<String, List<BrowseCategory>>>(emptyMap()) }
     var playerRequest by remember { mutableStateOf<PlayerRequest?>(null) }
     var loading by remember { mutableStateOf(false) }
     var signInError by remember { mutableStateOf("") }
@@ -160,6 +178,7 @@ fun NightOwlApp(sessionStore: SessionStore) {
             val availableProfiles = api.profiles()
             val chosen = availableProfiles.firstOrNull() ?: api.createProfile("Default")
             profile = chosen
+            profileSettings = chosen.settings
             favoriteKeys = api.myList(chosen.id).map { favoriteKey(it) }.toSet()
             signInError = ""
         } catch (error: Exception) {
@@ -216,6 +235,18 @@ fun NightOwlApp(sessionStore: SessionStore) {
         } finally { loading = false }
     }
 
+    LaunchedEffect(api, profile?.id, activeTab) {
+        if (activeTab != AppTab.SETTINGS) return@LaunchedEffect
+        val currentApi = api ?: return@LaunchedEffect
+        try {
+            settingsCategories = mapOf(
+                "live" to currentApi.categories("live"),
+                "movies" to currentApi.categories("movies"),
+                "series" to currentApi.categories("series")
+            )
+        } catch (error: Exception) { screenError = error.message ?: "Could not load settings categories." }
+    }
+
     LaunchedEffect(api, selectedItem?.id, selectedItem?.kind) {
         val source = selectedItem ?: run { detail = null; seasons = emptyList(); episodes = emptyList(); return@LaunchedEffect }
         val currentApi = api ?: return@LaunchedEffect
@@ -258,9 +289,10 @@ fun NightOwlApp(sessionStore: SessionStore) {
             loading = true
             screenError = ""
             try {
-                val url = currentApi.resolve(item)
-                val next = if (item.kind == "episode") currentApi.followingEpisode(item) else null
-                playerRequest = PlayerRequest(item, url, next)
+                val playable = currentApi.enrichEpisode(item)
+                val url = currentApi.resolve(playable)
+                val next = if (playable.kind == "episode") currentApi.followingEpisode(playable) else null
+                playerRequest = PlayerRequest(playable, url, next)
             } catch (error: Exception) { screenError = error.message ?: "Could not start playback." }
             finally { loading = false }
         }
@@ -269,14 +301,42 @@ fun NightOwlApp(sessionStore: SessionStore) {
     fun updateFavorite(item: MediaItem) {
         val currentApi = api ?: return
         val currentProfile = profile ?: return
-        val key = favoriteKey(item)
-        val save = key !in favoriteKeys
-        favoriteKeys = if (save) favoriteKeys + key else favoriteKeys - key
         scope.launch {
-            try { currentApi.setFavorite(currentProfile.id, item, save) }
+            val target = try { currentApi.episodeParent(item) } catch (_: Exception) { null }
+            if (target == null) { screenError = "Could not find the series for this episode."; return@launch }
+            val key = favoriteKey(target)
+            val save = key !in favoriteKeys
+            favoriteKeys = if (save) favoriteKeys + key else favoriteKeys - key
+            try {
+                currentApi.setFavorite(currentProfile.id, target, save)
+                home = currentApi.home(currentProfile.id)
+                if (activeTab == AppTab.MY_LIST) catalogItems = currentApi.myList(currentProfile.id)
+            }
             catch (error: Exception) {
                 favoriteKeys = if (save) favoriteKeys - key else favoriteKeys + key
                 screenError = error.message ?: "Could not update My List."
+            }
+        }
+    }
+
+    fun updateProfileSettings(next: ProfileSettings) {
+        val currentApi = api ?: return
+        val currentProfile = profile ?: return
+        profileSettings = next
+        profile = currentProfile.copy(settings = next)
+        val hiddenForCurrentTab = when (activeTab) {
+            AppTab.LIVE -> next.hiddenLiveCategories
+            AppTab.MOVIES -> next.hiddenMovieCategories
+            AppTab.SHOWS -> next.hiddenSeriesCategories
+            else -> emptySet()
+        }
+        if (categoryId in hiddenForCurrentTab) categoryId = ""
+        scope.launch {
+            try { currentApi.saveSettings(currentProfile.id, next) }
+            catch (error: Exception) {
+                profileSettings = currentProfile.settings
+                profile = currentProfile
+                screenError = error.message ?: "Could not save settings."
             }
         }
     }
@@ -339,19 +399,34 @@ fun NightOwlApp(sessionStore: SessionStore) {
             request = request,
             profileId = profile!!.id,
             api = api,
+            settings = profileSettings,
+            isFavorite = favoriteKey(if (request.item.kind == "episode" && request.item.seriesId.isNotBlank())
+                request.item.copy(kind = "series", id = request.item.seriesId) else request.item) in favoriteKeys,
+            onFavorite = { updateFavorite(request.item) },
             onBack = { item, position, duration ->
-                scope.launch { try { api.progress(profile!!.id, item, position, duration, false) } catch (_: Exception) { } }
+                scope.launch {
+                    try { api.progress(profile!!.id, item, position, duration, false) } catch (_: Exception) { }
+                    try { home = api.home(profile!!.id) } catch (_: Exception) { }
+                    if (activeTab == AppTab.MY_LIST) try { catalogItems = api.myList(profile!!.id) } catch (_: Exception) { }
+                }
                 playerRequest = null
             },
             onAdvance = { current, next, position, duration ->
                 scope.launch {
                     try { api.progress(profile!!.id, current, position, duration, true) } catch (_: Exception) { }
-                    try { playerRequest = PlayerRequest(next, api.resolve(next), api.followingEpisode(next)) }
+                    try {
+                        val playable = api.enrichEpisode(next)
+                        playerRequest = PlayerRequest(playable, api.resolve(playable), api.followingEpisode(playable))
+                    }
                     catch (error: Exception) { screenError = error.message ?: "Could not start the next episode."; playerRequest = null }
                 }
             },
             onFinished = { item, position, duration ->
-                scope.launch { try { api.progress(profile!!.id, item, position, duration, true) } catch (_: Exception) { } }
+                scope.launch {
+                    try { api.progress(profile!!.id, item, position, duration, true) } catch (_: Exception) { }
+                    try { home = api.home(profile!!.id) } catch (_: Exception) { }
+                    if (activeTab == AppTab.MY_LIST) try { catalogItems = api.myList(profile!!.id) } catch (_: Exception) { }
+                }
                 playerRequest = null
             }
         )
@@ -407,7 +482,8 @@ fun NightOwlApp(sessionStore: SessionStore) {
                     onPlayEpisode = ::startPlayback
                 )
             } else if (activeTab == AppTab.SETTINGS) {
-                SettingsScreen(serverUrl = session?.serverUrl.orEmpty(), onSignOut = ::signOut)
+                SettingsScreen(serverUrl = session?.serverUrl.orEmpty(), settings = profileSettings, categories = settingsCategories,
+                    onSettings = ::updateProfileSettings, onSignOut = ::signOut)
             } else when (activeTab) {
                 AppTab.HOME -> HomeScreen(
                     home = home,
@@ -423,8 +499,14 @@ fun NightOwlApp(sessionStore: SessionStore) {
                 )
                 AppTab.SHOWS, AppTab.MOVIES, AppTab.LIVE, AppTab.MY_LIST, AppTab.SEARCH -> BrowseScreen(
                     tab = activeTab,
+                    myCinemaName = profile?.name.orEmpty(),
                     items = catalogItems,
-                    categories = categories,
+                    categories = categories.filterNot { category -> when (activeTab) {
+                        AppTab.SHOWS -> category.id in profileSettings.hiddenSeriesCategories
+                        AppTab.MOVIES -> category.id in profileSettings.hiddenMovieCategories
+                        AppTab.LIVE -> category.id in profileSettings.hiddenLiveCategories
+                        else -> false
+                    } },
                     selectedCategory = categoryId,
                     query = searchText,
                     loading = loading,
@@ -581,6 +663,7 @@ private fun ShelfRow(shelf: com.marcpnut.nightowl.data.Shelf, onOpen: (MediaItem
 @Composable
 private fun BrowseScreen(
     tab: AppTab,
+    myCinemaName: String,
     items: List<MediaItem>,
     categories: List<BrowseCategory>,
     selectedCategory: String,
@@ -604,7 +687,7 @@ private fun BrowseScreen(
                 label = { Text("Search movies and shows") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)
             )
-            AppTab.MY_LIST -> Text("My List", Modifier.padding(horizontal = 18.dp, vertical = 12.dp), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            AppTab.MY_LIST -> Text("My Cinema - $myCinemaName", Modifier.padding(horizontal = 18.dp, vertical = 12.dp), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             else -> {
                 Text(tab.label, Modifier.padding(horizontal = 18.dp, vertical = 10.dp), color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Black)
                 if (categories.isNotEmpty()) {
@@ -750,14 +833,91 @@ private fun DetailScreen(
 }
 
 @Composable
-private fun SettingsScreen(serverUrl: String, onSignOut: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("Settings", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black)
-        Text("NightOwl server", color = Color(0xFFAEB6C3), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        Text(serverUrl, color = Color.White, fontSize = 16.sp)
-        Text("Your sign-in session is encrypted on this device.", color = Color(0xFFAEB6C3), fontSize = 14.sp)
-        Button(onClick = onSignOut, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF292D36))) {
-            Text("Log out", color = Color.White, fontWeight = FontWeight.Bold)
+private fun SettingsScreen(
+    serverUrl: String,
+    settings: ProfileSettings,
+    categories: Map<String, List<BrowseCategory>>,
+    onSettings: (ProfileSettings) -> Unit,
+    onSignOut: () -> Unit
+) {
+    var selectedGroup by remember { mutableStateOf("movies") }
+    val groupNames = listOf("live" to "Live TV", "movies" to "Movies", "series" to "Shows")
+    val hidden = when (selectedGroup) {
+        "live" -> settings.hiddenLiveCategories
+        "movies" -> settings.hiddenMovieCategories
+        else -> settings.hiddenSeriesCategories
+    }
+    fun changeHidden(values: Set<String>) {
+        onSettings(when (selectedGroup) {
+            "live" -> settings.copy(hiddenLiveCategories = values)
+            "movies" -> settings.copy(hiddenMovieCategories = values)
+            else -> settings.copy(hiddenSeriesCategories = values)
+        })
+    }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item { Text("Settings", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black) }
+        item { Text("Subtitles", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold) }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("en" to "English", "nl" to "Dutch", "pl" to "Polish").forEach { (code, label) ->
+                    FilterChip(selected = code in settings.subtitleSearchLanguages, onClick = {
+                        val chosen = if (code in settings.subtitleSearchLanguages) settings.subtitleSearchLanguages - code
+                            else settings.subtitleSearchLanguages + code
+                        onSettings(settings.copy(subtitleSearchLanguages = chosen.ifEmpty { listOf(code) }))
+                    }, label = { Text(label) })
+                }
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth().clickable {
+                onSettings(settings.copy(preferHearingImpairedSubtitles = !settings.preferHearingImpairedSubtitles))
+            }.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = settings.preferHearingImpairedSubtitles, onCheckedChange = {
+                    onSettings(settings.copy(preferHearingImpairedSubtitles = it))
+                })
+                Text("Prefer subtitles for the hearing impaired", color = Color.White, fontSize = 14.sp)
+            }
+        }
+        item { Text("Hidden categories", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold) }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                groupNames.forEach { (key, name) ->
+                    FilterChip(selected = key == selectedGroup, onClick = { selectedGroup = key }, label = { Text(name, maxLines = 1) })
+                }
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TextButton(onClick = { changeHidden(emptySet()) }) { Text("Show all", color = NightCyan) }
+                TextButton(onClick = { changeHidden(categories[selectedGroup].orEmpty().map { it.id }.toSet()) }) { Text("Hide all", color = NightCyan) }
+            }
+        }
+        val currentCategories = categories[selectedGroup].orEmpty()
+        if (currentCategories.isEmpty()) item { Text("Loading categories…", color = Color(0xFFB8BFCA), fontSize = 14.sp) }
+        items(currentCategories, key = { "setting-${selectedGroup}-${it.id}" }) { category ->
+            val visible = category.id !in hidden
+            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = visible, onCheckedChange = {
+                    changeHidden(if (it) hidden - category.id else hidden + category.id)
+                })
+                Text(category.name, Modifier.weight(1f).clickable {
+                    changeHidden(if (visible) hidden + category.id else hidden - category.id)
+                }, color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        item {
+            Text("NightOwl server", color = Color(0xFFAEB6C3), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(serverUrl, color = Color.White, fontSize = 15.sp)
+            Text("Settings and watch progress sync with your account.", color = Color(0xFFAEB6C3), fontSize = 13.sp)
+        }
+        item {
+            Button(onClick = onSignOut, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF292D36))) {
+                Text("Log out", color = Color.White, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
@@ -827,6 +987,9 @@ private fun PlayerScreen(
     request: PlayerRequest,
     profileId: String,
     api: NightOwlApi,
+    settings: ProfileSettings,
+    isFavorite: Boolean,
+    onFavorite: () -> Unit,
     onBack: (MediaItem, Long, Long?) -> Unit,
     onAdvance: (MediaItem, MediaItem, Long, Long?) -> Unit,
     onFinished: (MediaItem, Long, Long?) -> Unit
@@ -835,6 +998,10 @@ private fun PlayerScreen(
     val scope = rememberCoroutineScope()
     val player = remember(request.url) {
         ExoPlayer.Builder(context).build().apply {
+            trackSelectionParameters = trackSelectionParameters.buildUpon()
+                .setPreferredTextLanguages(*settings.subtitleSearchLanguages.toTypedArray())
+                .setPreferredTextRoleFlags(if (settings.preferHearingImpairedSubtitles) C.ROLE_FLAG_CAPTION else 0)
+                .build()
             setMediaItem(ExoMediaItem.fromUri(request.url))
             playWhenReady = true
             prepare()
@@ -848,6 +1015,17 @@ private fun PlayerScreen(
     var showControls by remember(request.url) { mutableStateOf(true) }
     var remuxAttempted by remember(request.url) { mutableStateOf(false) }
     var playbackError by remember(request.url) { mutableStateOf("") }
+    var isPlaying by remember(request.url) { mutableStateOf(true) }
+    var lastInteraction by remember(request.url) { mutableStateOf(System.currentTimeMillis()) }
+    var trackPicker by remember { mutableStateOf<TrackPicker?>(null) }
+    var trackChoices by remember(request.url) { mutableStateOf<List<TrackChoice>>(emptyList()) }
+    var scrubbing by remember(request.url) { mutableStateOf(false) }
+    var scrubPosition by remember(request.url) { mutableStateOf(0f) }
+
+    fun revealControls() {
+        showControls = true
+        lastInteraction = System.currentTimeMillis()
+    }
 
     BackHandler { onBack(request.item, positionMs / 1000, durationMs.takeIf { it > 0 }?.div(1000)) }
 
@@ -856,12 +1034,32 @@ private fun PlayerScreen(
         while (isActive) {
             positionMs = player.currentPosition.coerceAtLeast(0)
             durationMs = player.duration.takeIf { it > 0 } ?: 0
+            isPlaying = player.isPlaying
+            trackChoices = player.currentTracks.groups.flatMap { group ->
+                val type = group.type
+                if (type != C.TRACK_TYPE_AUDIO && type != C.TRACK_TYPE_TEXT) emptyList()
+                else (0 until group.length).filter { group.isTrackSupported(it) }.map { index ->
+                    val format = group.getTrackFormat(index)
+                    val language = format.language?.take(2)?.uppercase().orEmpty()
+                    val label = format.label?.takeIf { it.isNotBlank() } ?: language.ifBlank {
+                        if (type == C.TRACK_TYPE_AUDIO) "Audio ${index + 1}" else "Subtitle ${index + 1}"
+                    }
+                    TrackChoice(group, index, type, label, language, group.isTrackSelected(index))
+                }
+            }
             val now = System.currentTimeMillis()
             if (now - lastSaveAt >= 15_000 && positionMs > 0) {
                 lastSaveAt = now
                 try { api.progress(profileId, request.item, positionMs / 1000, durationMs.takeIf { it > 0 }?.div(1000), false) } catch (_: Exception) { }
             }
             delay(500)
+        }
+    }
+
+    LaunchedEffect(lastInteraction, isPlaying, playbackError) {
+        if (isPlaying && playbackError.isBlank()) {
+            delay(4_000)
+            if (System.currentTimeMillis() - lastInteraction >= 3_900) showControls = false
         }
     }
 
@@ -905,20 +1103,22 @@ private fun PlayerScreen(
     val remainingMs = (durationMs - positionMs).coerceAtLeast(0)
     val showNext = request.item.kind == "episode" && request.nextEpisode != null && !dismissedNext && !advanced && durationMs > 0 && remainingMs <= 10_000 && remainingMs > 0
     val nextProgress = ((10_000 - remainingMs).coerceIn(0, 10_000).toFloat() / 10_000f)
+    val activeAudio = trackChoices.firstOrNull { it.trackType == C.TRACK_TYPE_AUDIO && it.selected }
+    val activeSubtitle = trackChoices.firstOrNull { it.trackType == C.TRACK_TYPE_TEXT && it.selected }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
             factory = { viewContext -> PlayerView(viewContext).apply {
                 setPlayer(playbackPlayer)
-                useController = true
-                controllerShowTimeoutMs = 4_000
+                useController = false
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                setOnClickListener { showControls = !showControls }
+                setOnClickListener { revealControls() }
             } },
             modifier = Modifier.fillMaxSize(),
-            update = { it.setPlayer(playbackPlayer) }
+            update = { it.setPlayer(playbackPlayer); it.useController = false }
         )
+        Box(Modifier.fillMaxSize().clickable { revealControls() })
         if (playbackError.isNotBlank()) {
             Surface(
                 modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
@@ -929,28 +1129,42 @@ private fun PlayerScreen(
         }
         if (showControls) {
             Surface(
-                modifier = Modifier.align(Alignment.TopStart).padding(10.dp).shadow(4.dp, RoundedCornerShape(24.dp)),
-                color = Color(0x99090B10), shape = RoundedCornerShape(24.dp)
+                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp)
+                    .shadow(4.dp, RoundedCornerShape(18.dp)),
+                color = Color(0xCC090B10), shape = RoundedCornerShape(18.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 14.dp)) {
-                    IconButton(onClick = { onBack(request.item, positionMs / 1000, durationMs.takeIf { it > 0 }?.div(1000)) }) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { onBack(request.item, positionMs / 1000, durationMs.takeIf { it > 0 }?.div(1000)) }, modifier = Modifier.size(44.dp)) {
                         Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
                     }
-                    Column {
-                        Text(request.item.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (request.item.kind == "episode") Text(request.item.seriesTitle, color = Color(0xFFD0D4DC), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Column(Modifier.weight(1f).padding(start = 2.dp, end = 4.dp)) {
+                        Text(if (request.item.kind == "episode" && request.item.seriesTitle.isNotBlank()) request.item.seriesTitle else request.item.title,
+                            color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (request.item.kind == "episode") Text(request.item.title, color = Color(0xFFD0D4DC), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    IconButton(onClick = { revealControls(); onFavorite() }, modifier = Modifier.size(42.dp)) {
+                        Icon(if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            if (isFavorite) "Remove from My List" else "Add series to My List", tint = NightPurple)
+                    }
+                    IconButton(onClick = { revealControls(); trackPicker = TrackPicker.AUDIO }, modifier = Modifier.size(42.dp)) {
+                        Icon(Icons.Default.Audiotrack, "Audio language ${activeAudio?.language ?: ""}", tint = Color.White)
+                    }
+                    IconButton(onClick = { revealControls(); trackPicker = TrackPicker.SUBTITLES }, modifier = Modifier.size(42.dp)) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.ClosedCaption, "Subtitles ${activeSubtitle?.language ?: "off"}", tint = Color.White)
+                            if (activeSubtitle?.language?.isNotBlank() == true) Text(activeSubtitle.language, Modifier.align(Alignment.BottomEnd), color = NightPurple, fontSize = 8.sp, fontWeight = FontWeight.Black)
+                        }
                     }
                 }
             }
         }
         if (showNext) {
             Surface(
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = 78.dp),
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 132.dp),
                 shape = RoundedCornerShape(16.dp), color = Color(0xF0141720), tonalElevation = 8.dp
             ) {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 13.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Next episode", color = Color(0xFFCDD2DB), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text(request.nextEpisode.title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Next episode · ${request.nextEpisode.title}", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     LinearProgressIndicator(progress = { nextProgress }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(5.dp)), color = NightCyan, trackColor = Color(0xFF444A57))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
@@ -965,6 +1179,83 @@ private fun PlayerScreen(
                 }
             }
         }
+        if (showControls) {
+            Surface(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp),
+                color = Color(0xE6101218), shape = RoundedCornerShape(16.dp), tonalElevation = 4.dp
+            ) {
+                Column(Modifier.padding(horizontal = 6.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        IconButton(onClick = {
+                            revealControls()
+                            if (player.isPlaying) player.pause() else player.play()
+                        }, modifier = Modifier.size(42.dp)) {
+                            Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                if (isPlaying) "Pause" else "Play", tint = NightCyan, modifier = Modifier.size(25.dp))
+                        }
+                        IconButton(onClick = { revealControls(); player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0)) }, modifier = Modifier.size(40.dp)) {
+                            Icon(Icons.Default.Replay10, "Back 10 seconds", tint = Color.White, modifier = Modifier.size(23.dp))
+                        }
+                        Slider(
+                            value = if (scrubbing) scrubPosition else if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f,
+                            onValueChange = { scrubPosition = it; scrubbing = true; revealControls() },
+                            onValueChangeFinished = { if (durationMs > 0) player.seekTo((scrubPosition * durationMs).toLong()); scrubbing = false },
+                            enabled = durationMs > 0,
+                            modifier = Modifier.weight(1f).height(42.dp),
+                            colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = NightCyan, activeTrackColor = NightCyan, inactiveTrackColor = Color(0xFF727784))
+                        )
+                        IconButton(onClick = { revealControls(); if (durationMs > 0) player.seekTo((player.currentPosition + 10_000).coerceAtMost(durationMs)) }, modifier = Modifier.size(40.dp)) {
+                            Icon(Icons.Default.Forward10, "Forward 10 seconds", tint = Color.White, modifier = Modifier.size(23.dp))
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth().padding(start = 78.dp, end = 40.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(formatPlaybackTime(if (scrubbing) (scrubPosition * durationMs).toLong() else positionMs), color = Color(0xFFD9DDE5), fontSize = 10.sp)
+                        Text(formatPlaybackTime(durationMs), color = Color(0xFFD9DDE5), fontSize = 10.sp)
+                    }
+                }
+            }
+        }
+        if (trackPicker != null) {
+            val type = if (trackPicker == TrackPicker.AUDIO) C.TRACK_TYPE_AUDIO else C.TRACK_TYPE_TEXT
+            val choices = trackChoices.filter { it.trackType == type }
+            AlertDialog(
+                onDismissRequest = { trackPicker = null },
+                title = { Text(if (trackPicker == TrackPicker.AUDIO) "Audio language" else "Subtitles") },
+                text = {
+                    Column {
+                        if (trackPicker == TrackPicker.SUBTITLES) TextButton(onClick = {
+                            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                                .clearOverridesOfType(C.TRACK_TYPE_TEXT).setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+                            trackPicker = null; revealControls()
+                        }) { Text("Off", color = Color.White) }
+                        choices.forEach { choice ->
+                            TextButton(onClick = {
+                                player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                                    .clearOverridesOfType(type).setTrackTypeDisabled(type, false)
+                                    .addOverride(TrackSelectionOverride(choice.group.mediaTrackGroup, choice.trackIndex)).build()
+                                trackPicker = null; revealControls()
+                            }, modifier = Modifier.fillMaxWidth()) {
+                                Text("${choice.language.takeIf { it.isNotBlank() }?.let { "$it · " }.orEmpty()}${choice.label}${if (choice.selected) "  ✓" else ""}", color = Color.White)
+                            }
+                        }
+                        if (choices.isEmpty()) Text("No ${if (trackPicker == TrackPicker.AUDIO) "alternate audio" else "subtitle"} tracks are available.", color = Color(0xFFB8BFCA))
+                    }
+                },
+                confirmButton = { TextButton(onClick = { trackPicker = null }) { Text("Done", color = NightCyan) } },
+                containerColor = NightCard,
+                titleContentColor = Color.White,
+                textContentColor = Color.White
+            )
+        }
     }
+}
+
+private fun formatPlaybackTime(milliseconds: Long): String {
+    val totalSeconds = (milliseconds.coerceAtLeast(0) / 1000)
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%d:%02d".format(minutes, seconds)
 }
 

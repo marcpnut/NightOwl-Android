@@ -6,6 +6,9 @@ import java.net.URL
 import java.net.URLEncoder
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 class NightOwlApi(private val session: NightOwlSession) {
@@ -15,20 +18,39 @@ class NightOwlApi(private val session: NightOwlSession) {
 
     suspend fun profiles(): List<ProfileInfo> {
         val items = request("GET", "/profiles").optJSONArray("items") ?: return emptyList()
-        return (0 until items.length()).mapNotNull { i -> items.optJSONObject(i)?.let { ProfileInfo(it.optString("id"), it.optString("name")) } }
+        return (0 until items.length()).mapNotNull { i -> items.optJSONObject(i)?.toProfileInfo() }
     }
 
     suspend fun createProfile(name: String): ProfileInfo {
         val data = request("POST", "/profiles", JSONObject().put("name", name))
-        return ProfileInfo(data.optString("id"), data.optString("name", name))
+        return data.toProfileInfo().let { it.copy(name = it.name.ifBlank { name }) }
+    }
+
+    suspend fun saveSettings(profileId: String, settings: ProfileSettings) {
+        val hidden = JSONObject().put("live", org.json.JSONArray(settings.hiddenLiveCategories.toList()))
+            .put("movies", org.json.JSONArray(settings.hiddenMovieCategories.toList()))
+            .put("series", org.json.JSONArray(settings.hiddenSeriesCategories.toList()))
+        val body = JSONObject().put("settings", JSONObject()
+            .put("subtitleSearchLanguages", org.json.JSONArray(settings.subtitleSearchLanguages))
+            .put("preferHearingImpairedSubtitles", settings.preferHearingImpairedSubtitles)
+            .put("hiddenCategories", hidden))
+        request("PUT", "/profiles/${encode(profileId)}/preferences", body)
     }
 
     suspend fun home(profileId: String): HomeData {
         val data = request("GET", "/home?profileId=${encode(profileId)}")
         val rows = data.optJSONArray("rows")
-        return HomeData(data.optJSONObject("featured")?.toMediaItem(), rows?.let { list ->
+        val shelves = rows?.let { list ->
             (0 until list.length()).mapNotNull { i -> list.optJSONObject(i)?.toShelf() }
-        } ?: emptyList())
+        } ?: emptyList()
+        val enrichedShelves = coroutineScope {
+            shelves.map { shelf ->
+                if (shelf.id == "continue") shelf.copy(items = shelf.items.map { item ->
+                    async { if (item.kind == "episode") enrichEpisode(item) else item }
+                }.awaitAll()) else shelf
+            }
+        }
+        return HomeData(data.optJSONObject("featured")?.toMediaItem(), enrichedShelves)
     }
 
     suspend fun whatsNew(): HomeData {
@@ -70,6 +92,24 @@ class NightOwlApi(private val session: NightOwlSession) {
         return request("GET", "/$route/${encode(item.id)}?language=en").toMediaItem(item.kind)
     }
 
+    suspend fun enrichEpisode(item: MediaItem): MediaItem {
+        if (item.kind != "episode" || (item.seriesId.isNotBlank() && item.seriesTitle.isNotBlank())) return item
+        val parent = request("GET", "/episodes/${encode(item.id)}/parent")
+        return item.copy(seriesId = item.seriesId.ifBlank { parent.optString("seriesId") },
+            seriesTitle = item.seriesTitle.ifBlank { parent.optString("seriesTitle") })
+    }
+
+    suspend fun episodeParent(item: MediaItem): MediaItem? {
+        if (item.kind != "episode") return item
+        if (item.seriesId.isNotBlank()) return MediaItem(kind = "series", id = item.seriesId,
+            title = item.seriesTitle.ifBlank { item.title }, posterUrl = item.posterUrl, backdropUrl = item.backdropUrl)
+        val parent = request("GET", "/episodes/${encode(item.id)}/parent")
+        val id = parent.optString("seriesId")
+        if (id.isBlank()) return null
+        return MediaItem(kind = "series", id = id, title = parent.optString("seriesTitle").ifBlank { item.title },
+            posterUrl = item.posterUrl, backdropUrl = item.backdropUrl)
+    }
+
     suspend fun seasons(seriesId: String): List<SeasonInfo> {
         val items = request("GET", "/series/${encode(seriesId)}/seasons").optJSONArray("seasons") ?: return emptyList()
         return (0 until items.length()).mapNotNull { i -> items.optJSONObject(i)?.let { SeasonInfo(it.optInt("number"), it.optInt("count")) } }
@@ -82,17 +122,20 @@ class NightOwlApi(private val session: NightOwlSession) {
     }
 
     suspend fun followingEpisode(item: MediaItem): MediaItem? {
-        val seriesId = item.seriesId
-        val currentSeason = item.seasonNumber ?: return null
-        val currentEpisode = item.episodeNumber ?: return null
+        val enriched = enrichEpisode(item)
+        val seriesId = enriched.seriesId
         if (seriesId.isBlank()) return null
-        for (season in seasons(seriesId).sortedBy { it.number }) {
+        val seasons = seasons(seriesId).sortedBy { it.number }
+        val currentSeason = enriched.seasonNumber ?: seasons.firstOrNull()?.number ?: return null
+        val currentEpisode = enriched.episodeNumber
+        for (season in seasons) {
             if (season.number < currentSeason) continue
             for (page in 1..100) {
                 val result = episodes(seriesId, season.number, page)
                 val ordered = result.items.sortedWith(compareBy<MediaItem> { it.episodeNumber ?: 0 }.thenBy { it.id })
                 if (season.number > currentSeason) return ordered.firstOrNull()
-                val index = ordered.indexOfFirst { it.id == item.id || it.playbackId == item.playbackId || it.episodeNumber == currentEpisode }
+                val index = ordered.indexOfFirst { it.id == enriched.id || it.playbackId == enriched.playbackId ||
+                    (currentEpisode != null && it.episodeNumber == currentEpisode) }
                 if (index >= 0) {
                     ordered.getOrNull(index + 1)?.let { return it }
                     if (!result.hasMore) break
@@ -115,8 +158,9 @@ class NightOwlApi(private val session: NightOwlSession) {
     }
 
     suspend fun setFavorite(profileId: String, item: MediaItem, saved: Boolean) {
+        val target = if (item.kind == "episode") episodeParent(item) ?: throw IllegalStateException("Could not find the series for this episode.") else item
         request("POST", "/profiles/${encode(profileId)}/my-list",
-            JSONObject().put("kind", item.kind).put("id", item.id).put("saved", saved))
+            JSONObject().put("kind", target.kind).put("id", target.id).put("saved", saved))
     }
 
     suspend fun progress(profileId: String, item: MediaItem, positionSeconds: Long, durationSeconds: Long?, completed: Boolean) {

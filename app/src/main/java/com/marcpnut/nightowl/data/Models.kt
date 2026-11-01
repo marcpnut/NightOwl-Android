@@ -28,7 +28,14 @@ data class MediaItem(
 
 data class Shelf(val id: String, val title: String, val items: List<MediaItem>)
 data class HomeData(val featured: MediaItem?, val rows: List<Shelf>)
-data class ProfileInfo(val id: String, val name: String)
+data class ProfileInfo(val id: String, val name: String, val settings: ProfileSettings = ProfileSettings())
+data class ProfileSettings(
+    val subtitleSearchLanguages: List<String> = listOf("en", "nl", "pl"),
+    val preferHearingImpairedSubtitles: Boolean = false,
+    val hiddenLiveCategories: Set<String> = emptySet(),
+    val hiddenMovieCategories: Set<String> = emptySet(),
+    val hiddenSeriesCategories: Set<String> = emptySet()
+)
 data class BrowseCategory(val id: String, val name: String)
 data class SeasonInfo(val number: Int, val count: Int)
 data class EpisodePage(val items: List<MediaItem>, val hasMore: Boolean)
@@ -52,6 +59,23 @@ internal fun JSONObject.toMediaItem(fallbackKind: String = "movie"): MediaItem {
         seriesTitle = optString("seriesTitle"),
         streamExtension = optString("streamExtension").trim().removePrefix(".").lowercase()
     )
+}
+
+internal fun JSONObject.toProfileInfo(): ProfileInfo {
+    val profileSettings = optJSONObject("preferences")?.optJSONObject("settings")
+    val hidden = profileSettings?.optJSONObject("hiddenCategories")
+    fun strings(source: org.json.JSONArray?): Set<String> = if (source == null) emptySet()
+        else (0 until source.length()).mapNotNull { source.optString(it).takeIf(String::isNotBlank) }.toSet()
+    val languages = profileSettings?.optJSONArray("subtitleSearchLanguages")
+        ?.let { source -> (0 until source.length()).map { source.optString(it) }.filter { it.matches(Regex("^[a-z]{2}$")) } }
+        ?.ifEmpty { listOf("en", "nl", "pl") } ?: listOf("en", "nl", "pl")
+    return ProfileInfo(optString("id"), optString("name"), ProfileSettings(
+        subtitleSearchLanguages = languages,
+        preferHearingImpairedSubtitles = profileSettings?.optBoolean("preferHearingImpairedSubtitles") ?: false,
+        hiddenLiveCategories = strings(hidden?.optJSONArray("live")),
+        hiddenMovieCategories = strings(hidden?.optJSONArray("movies")),
+        hiddenSeriesCategories = strings(hidden?.optJSONArray("series"))
+    ))
 }
 
 internal fun JSONObject.toShelf(): Shelf = Shelf(
