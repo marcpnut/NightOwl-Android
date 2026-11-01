@@ -22,9 +22,12 @@ jobs:
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v4
       - name: Assemble debug APK
-        run: ./gradlew assembleDebug
+        run: set -o pipefail; ./gradlew assembleDebug --stacktrace --console=plain 2>&1 | tee android-build.log
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: NightOwl-Android-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            android-build.log
+          if-no-files-found: warn
