@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -840,6 +839,7 @@ private fun PlayerScreen(
             prepare()
         }
     }
+    val playbackPlayer = player
     var positionMs by remember(request.url) { mutableStateOf(0L) }
     var durationMs by remember(request.url) { mutableStateOf(0L) }
     var dismissedNext by remember(request.url) { mutableStateOf(false) }
@@ -884,7 +884,7 @@ private fun PlayerScreen(
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
             factory = { viewContext -> PlayerView(viewContext).apply {
-                player = this@PlayerScreen.player
+                player = playbackPlayer
                 useController = true
                 controllerShowTimeoutMs = 4_000
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
@@ -892,7 +892,7 @@ private fun PlayerScreen(
                 setOnClickListener { showControls = !showControls }
             } },
             modifier = Modifier.fillMaxSize(),
-            update = { it.player = player }
+            update = { it.player = playbackPlayer }
         )
         if (showControls) {
             Surface(
