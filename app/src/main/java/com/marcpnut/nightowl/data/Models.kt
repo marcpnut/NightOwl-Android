@@ -20,7 +20,8 @@ data class MediaItem(
     val seasonNumber: Int? = null,
     val episodeNumber: Int? = null,
     val seriesId: String = "",
-    val seriesTitle: String = ""
+    val seriesTitle: String = "",
+    val streamExtension: String = ""
 ) {
     val playbackId: String get() = streamId.ifBlank { id }
 }
@@ -48,7 +49,8 @@ internal fun JSONObject.toMediaItem(fallbackKind: String = "movie"): MediaItem {
         seasonNumber = optIntOrNull("seasonNumber"),
         episodeNumber = optIntOrNull("episodeNumber"),
         seriesId = optString("seriesId"),
-        seriesTitle = optString("seriesTitle")
+        seriesTitle = optString("seriesTitle"),
+        streamExtension = optString("streamExtension").trim().removePrefix(".").lowercase()
     )
 }
 

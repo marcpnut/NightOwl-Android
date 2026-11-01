@@ -90,6 +90,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -845,6 +846,8 @@ private fun PlayerScreen(
     var dismissedNext by remember(request.url) { mutableStateOf(false) }
     var advanced by remember(request.url) { mutableStateOf(false) }
     var showControls by remember(request.url) { mutableStateOf(true) }
+    var remuxAttempted by remember(request.url) { mutableStateOf(false) }
+    var playbackError by remember(request.url) { mutableStateOf("") }
 
     BackHandler { onBack(request.item, positionMs / 1000, durationMs.takeIf { it > 0 }?.div(1000)) }
 
@@ -866,6 +869,28 @@ private fun PlayerScreen(
 
     LaunchedEffect(player, request.url) {
         player.addListener(object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                val canRemux = request.item.kind in setOf("movie", "episode") &&
+                    request.item.streamExtension in setOf("mkv", "avi", "wmv", "flv", "mov", "ts", "mpeg", "mpg")
+                if (!remuxAttempted && canRemux) {
+                    remuxAttempted = true
+                    playbackError = "Original stream failed. Trying a server remux…"
+                    scope.launch {
+                        try {
+                            val remuxUrl = api.remuxUrl(request.item)
+                            playbackPlayer.setMediaItem(ExoMediaItem.fromUri(remuxUrl))
+                            playbackPlayer.prepare()
+                            playbackPlayer.playWhenReady = true
+                            playbackError = ""
+                        } catch (remuxError: Exception) {
+                            playbackError = remuxError.message ?: "The original stream and remux could not be played."
+                        }
+                    }
+                } else {
+                    playbackError = "This stream could not be played. Check the format or TV codec support."
+                    showControls = true
+                }
+            }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED && !advanced) {
                     advanced = true
@@ -894,6 +919,14 @@ private fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
             update = { it.setPlayer(playbackPlayer) }
         )
+        if (playbackError.isNotBlank()) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
+                color = Color(0xE6151820), shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(playbackError, color = Color.White, fontSize = 15.sp, lineHeight = 20.sp, modifier = Modifier.padding(14.dp))
+            }
+        }
         if (showControls) {
             Surface(
                 modifier = Modifier.align(Alignment.TopStart).padding(10.dp).shadow(4.dp, RoundedCornerShape(24.dp)),

@@ -108,6 +108,12 @@ class NightOwlApi(private val session: NightOwlSession) {
     suspend fun resolve(item: MediaItem): String = request("POST", "/playback/resolve",
         JSONObject().put("kind", item.kind).put("id", item.playbackId)).getString("url")
 
+    suspend fun remuxUrl(item: MediaItem): String {
+        val path = request("POST", "/playback/remux-ticket",
+            JSONObject().put("kind", item.kind).put("id", item.playbackId).put("transcode", false)).getString("url")
+        return session.serverUrl.trimEnd('/') + path
+    }
+
     suspend fun setFavorite(profileId: String, item: MediaItem, saved: Boolean) {
         request("POST", "/profiles/${encode(profileId)}/my-list",
             JSONObject().put("kind", item.kind).put("id", item.id).put("saved", saved))
