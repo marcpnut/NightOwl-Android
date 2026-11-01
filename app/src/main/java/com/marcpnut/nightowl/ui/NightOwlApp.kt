@@ -2,6 +2,7 @@ package com.marcpnut.nightowl.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.app.Activity
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -148,6 +149,7 @@ fun NightOwlApp(sessionStore: SessionStore) {
     var session by remember { mutableStateOf(sessionStore.load()) }
     val api = remember(session) { session?.let(::NightOwlApi) }
     var profile by remember { mutableStateOf<ProfileInfo?>(null) }
+    var profiles by remember { mutableStateOf<List<ProfileInfo>>(emptyList()) }
     var activeTab by remember { mutableStateOf(AppTab.HOME) }
     var home by remember { mutableStateOf<HomeData?>(null) }
     var categories by remember { mutableStateOf<List<BrowseCategory>>(emptyList()) }
@@ -169,6 +171,7 @@ fun NightOwlApp(sessionStore: SessionStore) {
     var loading by remember { mutableStateOf(false) }
     var signInError by remember { mutableStateOf("") }
     var screenError by remember { mutableStateOf("") }
+    var exitPrompt by remember { mutableStateOf(false) }
 
     LaunchedEffect(api) {
         if (api == null) { profile = null; home = null; return@LaunchedEffect }
@@ -177,6 +180,7 @@ fun NightOwlApp(sessionStore: SessionStore) {
             api.health()
             val availableProfiles = api.profiles()
             val chosen = availableProfiles.firstOrNull() ?: api.createProfile("Default")
+            profiles = if (availableProfiles.isEmpty()) listOf(chosen) else availableProfiles
             profile = chosen
             profileSettings = chosen.settings
             favoriteKeys = api.myList(chosen.id).map { favoriteKey(it) }.toSet()
@@ -388,9 +392,34 @@ fun NightOwlApp(sessionStore: SessionStore) {
         sessionStore.clear()
         session = null
         profile = null
+        profiles = emptyList()
         playerRequest = null
         selectedItem = null
         activeTab = AppTab.HOME
+    }
+
+    fun selectProfile(next: ProfileInfo) {
+        if (profile?.id == next.id) return
+        profile = next
+        profileSettings = next.settings
+        selectedItem = null
+        categoryId = ""
+        val currentApi = api ?: return
+        scope.launch {
+            try { favoriteKeys = currentApi.myList(next.id).map { favoriteKey(it) }.toSet() }
+            catch (error: Exception) { screenError = error.message ?: "Could not load this profile." }
+        }
+    }
+
+    fun addProfile(name: String) {
+        val currentApi = api ?: return
+        scope.launch {
+            try {
+                val created = currentApi.createProfile(name)
+                profiles = profiles + created
+                selectProfile(created)
+            } catch (error: Exception) { screenError = error.message ?: "Could not create the profile." }
+        }
     }
 
     val request = playerRequest
@@ -446,6 +475,14 @@ fun NightOwlApp(sessionStore: SessionStore) {
         return
     }
 
+    BackHandler {
+        when {
+            selectedItem != null -> selectedItem = null
+            activeTab != AppTab.HOME -> openTab(AppTab.HOME)
+            else -> exitPrompt = true
+        }
+    }
+
     val detailItem = selectedItem
     Scaffold(
         containerColor = NightBlack,
@@ -483,6 +520,7 @@ fun NightOwlApp(sessionStore: SessionStore) {
                 )
             } else if (activeTab == AppTab.SETTINGS) {
                 SettingsScreen(serverUrl = session?.serverUrl.orEmpty(), settings = profileSettings, categories = settingsCategories,
+                    profiles = profiles, selectedProfileId = profile?.id.orEmpty(), onSelectProfile = ::selectProfile, onAddProfile = ::addProfile,
                     onSettings = ::updateProfileSettings, onSignOut = ::signOut)
             } else when (activeTab) {
                 AppTab.HOME -> HomeScreen(
@@ -522,6 +560,19 @@ fun NightOwlApp(sessionStore: SessionStore) {
                 AppTab.SETTINGS -> Unit
             }
         }
+    }
+
+    if (exitPrompt) {
+        AlertDialog(
+            onDismissRequest = { exitPrompt = false },
+            title = { Text("Leave NightOwl?") },
+            text = { Text("Do you want to exit the app?") },
+            confirmButton = { TextButton(onClick = { exitPrompt = false; (context as? Activity)?.finish() }) { Text("Exit", color = NightCyan) } },
+            dismissButton = { TextButton(onClick = { exitPrompt = false }) { Text("Stay", color = Color.White) } },
+            containerColor = NightCard,
+            titleContentColor = Color.White,
+            textContentColor = Color(0xFFD7DBE3)
+        )
     }
 }
 
@@ -837,10 +888,16 @@ private fun SettingsScreen(
     serverUrl: String,
     settings: ProfileSettings,
     categories: Map<String, List<BrowseCategory>>,
+    profiles: List<ProfileInfo>,
+    selectedProfileId: String,
+    onSelectProfile: (ProfileInfo) -> Unit,
+    onAddProfile: (String) -> Unit,
     onSettings: (ProfileSettings) -> Unit,
     onSignOut: () -> Unit
 ) {
     var selectedGroup by remember { mutableStateOf("movies") }
+    var showAddProfile by remember { mutableStateOf(false) }
+    var newProfileName by remember { mutableStateOf("") }
     val groupNames = listOf("live" to "Live TV", "movies" to "Movies", "series" to "Shows")
     val hidden = when (selectedGroup) {
         "live" -> settings.hiddenLiveCategories
@@ -860,6 +917,18 @@ private fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item { Text("Settings", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black) }
+        item { Text("Profiles", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold) }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
+                items(profiles, key = { "profile-${it.id}" }) { userProfile ->
+                    FilterChip(selected = userProfile.id == selectedProfileId, onClick = { onSelectProfile(userProfile) },
+                        label = { Text(userProfile.name, maxLines = 1) })
+                }
+            }
+        }
+        item {
+            TextButton(onClick = { newProfileName = ""; showAddProfile = true }) { Text("＋  Add profile", color = NightCyan, fontWeight = FontWeight.Bold) }
+        }
         item { Text("Subtitles", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -919,6 +988,23 @@ private fun SettingsScreen(
                 Text("Log out", color = Color.White, fontWeight = FontWeight.Bold)
             }
         }
+    }
+    if (showAddProfile) {
+        AlertDialog(
+            onDismissRequest = { showAddProfile = false },
+            title = { Text("Add profile") },
+            text = {
+                OutlinedTextField(value = newProfileName, onValueChange = { newProfileName = it.take(24) },
+                    label = { Text("Profile name") }, singleLine = true)
+            },
+            confirmButton = { TextButton(enabled = newProfileName.trim().isNotEmpty(), onClick = {
+                onAddProfile(newProfileName.trim()); showAddProfile = false
+            }) { Text("Create", color = NightCyan) } },
+            dismissButton = { TextButton(onClick = { showAddProfile = false }) { Text("Cancel", color = Color.White) } },
+            containerColor = NightCard,
+            titleContentColor = Color.White,
+            textContentColor = Color.White
+        )
     }
 }
 
