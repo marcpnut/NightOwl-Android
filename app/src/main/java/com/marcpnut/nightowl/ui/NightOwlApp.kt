@@ -1128,6 +1128,7 @@ private fun PlayerScreen(
     var advanced by remember(request.url) { mutableStateOf(false) }
     var showControls by remember(request.url) { mutableStateOf(true) }
     var remuxAttempted by remember(request.url) { mutableStateOf(false) }
+    var showRemuxPrompt by remember(request.url) { mutableStateOf(false) }
     val isRemuxPlayback by rememberUpdatedState(remuxAttempted)
     var playbackError by remember(request.url) { mutableStateOf("") }
     var isPlaying by remember(request.url) { mutableStateOf(true) }
@@ -1140,6 +1141,24 @@ private fun PlayerScreen(
     fun revealControls() {
         showControls = true
         lastInteraction = System.currentTimeMillis()
+    }
+
+    fun startRemuxPlayback() {
+        showRemuxPrompt = false
+        remuxAttempted = true
+        playbackError = "Starting server remux…"
+        showControls = true
+        scope.launch {
+            try {
+                val remuxUrl = api.remuxUrl(request.item)
+                playbackPlayer.setMediaItem(ExoMediaItem.fromUri(remuxUrl))
+                playbackPlayer.prepare()
+                playbackPlayer.playWhenReady = true
+                playbackError = ""
+            } catch (remuxError: Exception) {
+                playbackError = remuxError.message ?: "The remux stream could not be started."
+            }
+        }
     }
 
     BackHandler { onBack(request.item, positionMs / 1000, durationMs.takeIf { it > 0 }?.div(1000)) }
@@ -1183,22 +1202,11 @@ private fun PlayerScreen(
     LaunchedEffect(player, request.url) {
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                val canRemux = request.item.kind in setOf("movie", "episode") &&
-                    request.item.streamExtension in setOf("mkv", "avi", "wmv", "flv", "mov", "ts", "mpeg", "mpg")
+                val canRemux = request.item.kind == "movie" || request.item.kind == "episode"
                 if (!remuxAttempted && canRemux) {
-                    remuxAttempted = true
-                    playbackError = "Original stream failed. Trying a server remux…"
-                    scope.launch {
-                        try {
-                            val remuxUrl = api.remuxUrl(request.item)
-                            playbackPlayer.setMediaItem(ExoMediaItem.fromUri(remuxUrl))
-                            playbackPlayer.prepare()
-                            playbackPlayer.playWhenReady = true
-                            playbackError = ""
-                        } catch (remuxError: Exception) {
-                            playbackError = remuxError.message ?: "The original stream and remux could not be played."
-                        }
-                    }
+                    playbackError = "The provider stream could not be played."
+                    showRemuxPrompt = true
+                    showControls = true
                 } else {
                     playbackError = "This stream could not be played. Check the format or TV codec support."
                     showControls = true
@@ -1359,6 +1367,27 @@ private fun PlayerScreen(
                     }
                 },
                 confirmButton = { TextButton(onClick = { trackPicker = null }) { Text("Done", color = NightCyan) } },
+                containerColor = NightCard,
+                titleContentColor = Color.White,
+                textContentColor = Color.White
+            )
+        }
+        if (showRemuxPrompt) {
+            AlertDialog(
+                onDismissRequest = { showRemuxPrompt = false },
+                title = { Text("Provider stream unavailable") },
+                text = { Text("The original provider stream could not be played. Would you like to try a server remux stream?") },
+                confirmButton = {
+                    TextButton(onClick = { startRemuxPlayback() }) {
+                        Text("Use remux", color = NightCyan, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showRemuxPrompt = false
+                        playbackError = "Provider stream could not be played."
+                    }) { Text("Keep original", color = Color.White) }
+                },
                 containerColor = NightCard,
                 titleContentColor = Color.White,
                 textContentColor = Color.White
