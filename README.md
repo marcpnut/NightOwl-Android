@@ -25,6 +25,7 @@ The APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Server and network
 
-The sign-in form defaults to `https://[redacted]`. The Android client requires HTTPS for account sign-in and stores the session token encrypted with Android Keystore. The provider can return HTTP media URLs; cleartext media is enabled for playback compatibility. Use a trusted server URL and network when signing in.
+Enter your own NightOwl server address on the sign-in screen. Use HTTPS for account sign-in; the Android client stores the session token encrypted with Android Keystore. The provider can return HTTP media URLs; cleartext media is enabled for playback compatibility.
 
 The app connects to the existing NightOwl API. It does not store Xtream credentials, modify the server database, or create user accounts.
+

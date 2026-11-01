@@ -489,7 +489,7 @@ private fun BottomNavigation(activeTab: AppTab, onSelect: (AppTab) -> Unit) {
 
 @Composable
 private fun SignInScreen(loading: Boolean, error: String, onSignIn: (String, String, String) -> Unit) {
-    var server by remember { mutableStateOf("https://[redacted]") }
+    var server by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     Box(Modifier.fillMaxSize().background(NightBlack), contentAlignment = Alignment.Center) {
@@ -501,13 +501,13 @@ private fun SignInScreen(loading: Boolean, error: String, onSignIn: (String, Str
             Image(painterResource(R.drawable.nightowl_logo), "NightOwl", Modifier.fillMaxWidth().height(58.dp), contentScale = ContentScale.Fit)
             Text("Sign in", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
             Text("Connect to your NightOwl library.", color = Color(0xFFBFC6D2), fontSize = 15.sp)
-            OutlinedTextField(server, { server = it }, Modifier.fillMaxWidth(), label = { Text("NightOwl server") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next))
+            OutlinedTextField(server, { server = it }, Modifier.fillMaxWidth(), label = { Text("Server address") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next))
             OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text("Username") }, singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next))
             OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("Password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done))
             if (error.isNotBlank()) Text(error, color = Color(0xFFFF8A8A), fontSize = 14.sp)
             Button(
                 onClick = { onSignIn(server, username, password); password = "" },
-                enabled = !loading && username.isNotBlank() && password.isNotBlank(),
+                enabled = !loading && server.isNotBlank() && username.isNotBlank() && password.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = NightCyan, contentColor = Color(0xFF071016)),
                 shape = RoundedCornerShape(10.dp)
@@ -967,3 +967,4 @@ private fun PlayerScreen(
         }
     }
 }
+
