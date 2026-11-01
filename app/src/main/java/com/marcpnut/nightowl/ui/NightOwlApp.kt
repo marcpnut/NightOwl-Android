@@ -593,7 +593,11 @@ private fun AppHeader(onSearch: () -> Unit, onSettings: () -> Unit, onMyList: ()
         }
         Spacer(Modifier.weight(1f))
         IconButton(onClick = onSearch, modifier = Modifier.size(actionSize)) { Icon(Icons.Default.Search, "Search", tint = Color.White) }
-        IconButton(onClick = onMyList, modifier = Modifier.size(actionSize)) { Icon(Icons.Default.Bookmarks, "My List", tint = Color.White) }
+        TextButton(onClick = onMyList, modifier = Modifier.height(actionSize)) {
+            Icon(Icons.Default.Bookmarks, "My Cinema", tint = Color.White, modifier = Modifier.size(if (compact) 17.dp else 19.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("My Cinema", color = Color.White, fontSize = if (compact) 10.sp else 12.sp, maxLines = 1, softWrap = false)
+        }
         IconButton(onClick = onSettings, modifier = Modifier.size(actionSize)) { Icon(Icons.Default.Settings, "Settings", tint = Color.White) }
     }
 }
