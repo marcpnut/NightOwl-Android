@@ -312,7 +312,7 @@ fun NightOwlApp(sessionStore: SessionStore) {
         val currentApi = api ?: return
         val currentProfile = profile ?: return
         scope.launch {
-            val target = try { currentApi.episodeParent(item) } catch (_: Exception) { null }
+            val target = if (item.kind == "episode") try { currentApi.episodeParent(item) } catch (_: Exception) { null } else item
             if (target == null) { screenError = "Could not find the series for this episode."; return@launch }
             val key = favoriteKey(target)
             val save = key !in favoriteKeys
@@ -1129,6 +1129,7 @@ private fun PlayerScreen(
     var showControls by remember(request.url) { mutableStateOf(true) }
     var remuxAttempted by remember(request.url) { mutableStateOf(false) }
     var showRemuxPrompt by remember(request.url) { mutableStateOf(false) }
+    var showPlaybackErrorDialog by remember(request.url) { mutableStateOf(false) }
     val isRemuxPlayback by rememberUpdatedState(remuxAttempted)
     var playbackError by remember(request.url) { mutableStateOf("") }
     var isPlaying by remember(request.url) { mutableStateOf(true) }
@@ -1157,6 +1158,7 @@ private fun PlayerScreen(
                 playbackError = ""
             } catch (remuxError: Exception) {
                 playbackError = remuxError.message ?: "The remux stream could not be started."
+                showPlaybackErrorDialog = true
             }
         }
     }
@@ -1209,6 +1211,7 @@ private fun PlayerScreen(
                     showControls = true
                 } else {
                     playbackError = "This stream could not be played. Check the format or TV codec support."
+                    showPlaybackErrorDialog = true
                     showControls = true
                 }
             }
@@ -1243,13 +1246,16 @@ private fun PlayerScreen(
             update = { it.setPlayer(playbackPlayer); it.useController = false }
         )
         Box(Modifier.fillMaxSize().clickable { revealControls() })
-        if (playbackError.isNotBlank()) {
-            Surface(
-                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
-                color = Color(0xE6151820), shape = RoundedCornerShape(12.dp)
-            ) {
-                Text(playbackError, color = Color.White, fontSize = 15.sp, lineHeight = 20.sp, modifier = Modifier.padding(14.dp))
-            }
+        if (showPlaybackErrorDialog && playbackError.isNotBlank()) {
+            AlertDialog(
+                onDismissRequest = { showPlaybackErrorDialog = false },
+                title = { Text("Playback error") },
+                text = { Text(playbackError) },
+                confirmButton = { TextButton(onClick = { showPlaybackErrorDialog = false }) { Text("Close", color = NightCyan) } },
+                containerColor = NightCard,
+                titleContentColor = Color.White,
+                textContentColor = Color.White
+            )
         }
         if (showControls) {
             Surface(
@@ -1386,6 +1392,7 @@ private fun PlayerScreen(
                     TextButton(onClick = {
                         showRemuxPrompt = false
                         playbackError = "Provider stream could not be played."
+                            showPlaybackErrorDialog = true
                     }) { Text("Keep original", color = Color.White) }
                 },
                 containerColor = NightCard,

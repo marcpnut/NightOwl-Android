@@ -34,5 +34,5 @@ The app connects to the existing NightOwl API. It does not store Xtream credenti
 
 ## Downloads
 
-Download the current Android phone APK [directly](https://github.com/marcpnut/NightOwl-Android/releases/download/v0.2.5/NightOwl-Android-0.2.5.apk) or view the [0.2.5 release notes](https://github.com/marcpnut/NightOwl-Android/releases/tag/v0.2.5). It is signed for sideloading.
+Download the current Android phone APK [directly](https://github.com/marcpnut/NightOwl-Android/releases/download/v0.2.6/NightOwl-Android-0.2.6.apk) or view the [0.2.6 release notes](https://github.com/marcpnut/NightOwl-Android/releases/tag/v0.2.6). It is signed for sideloading.
 
